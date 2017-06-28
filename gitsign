@@ -1,0 +1,42 @@
+#!/bin/sh
+# Oren Tirosh <orent@hishome.net>
+#
+# Create minimal git repository capable of performing "git status" on worktree
+# Includes only tree objects required to verify file hashes. No commits or blobs.
+#
+# Useful arguments: 
+#   --exclude-standard to apply .gitignore rules, other git ls-files exclude args
+#
+# Show modified files:
+#   git --git-dir=.gitsignature status
+#
+# Show hash of a signed tree:       
+#   git --git-dir=.gitsignature rev-parse HEAD:
+
+set -e; trap 'echo Unexpected error run with sh -x to debug. >&2' EXIT
+
+# Absolutely minimal git repository:
+export GIT_DIR=.gitsignature
+mkdir -p $GIT_DIR/refs
+mkdir -p $GIT_DIR/objects
+git hash-object -t tree /dev/null > $GIT_DIR/HEAD
+
+# Populate index, excluding blobs and signature itself:
+mkdir -p $GIT_DIR/info
+echo $GIT_DIR/ >> $GIT_DIR/info/exclude
+git ls-files --others "$@" -X $GIT_DIR/info/exclude | git update-index --info-only --add --stdin
+echo $(git write-tree --missing-ok) > $GIT_DIR/HEAD     # Yes, HEAD is a tree, not a commit
+
+# Fix symlinks (ok, I lied about no blobs, symlinks are actually tiny blobs):
+git read-tree HEAD || :
+git ls-files --modified | git update-index --add --remove --stdin
+
+# Pack everything into one packfile:
+( 
+  cd $GIT_DIR/objects/ && 
+  find * -path "??/??????????????????????????????????????" | tr -d /
+) | git pack-objects --non-empty -q $GIT_DIR/objects/pack/pack >/dev/null
+git prune-packed
+
+git rev-parse HEAD:
+trap - EXIT

@@ -1,0 +1,89 @@
+#!/bin/sh
+# https://opensource.org/licenses/MIT (c) 2017
+# Oren Tirosh <orent@hishome.nte>
+#
+# Create an object representing the current state of the git repository 
+# including all branches and tags and prints its hash to stdout. 
+# Includes all state information that git clones/pushes/pulls by default. 
+# Adding the --mirror argument includes the same additional state that 
+# the --mirror argument adds to git-push.
+#
+# Note: git worktree, config, hooks, etc are not included.
+#
+# The repostate is a commit object, but do not try to check it out. 
+# State is restored with git-repostate-restore.
+#
+# State should be deterministic i.e. running git-repostate twice
+# should produce the same hash and running it immediately after 
+# restoring a state hash should produce the same hash.
+
+trap "exit 1" URG
+check() {
+    trap "exit 1" URG
+    "${@:-:}" || { 
+        echo "${0##*/}: '$1' returned exit code $? on line $LINENO" >&2
+        kill -URG 0
+        exit 1
+    }
+} 
+
+REFS="refs/heads/ refs/tags/"
+test "x$1" = "x--mirror" && { REFS="refs/"; shift; }
+
+test $# = 0 || { echo "Usage: git repostate [--mirror]"; exit 1; }
+
+export GIT_COMMITTER_NAME=" " GIT_COMMITTER_EMAIL= 
+export GIT_AUTHOR_NAME=" "    GIT_AUTHOR_EMAIL=    
+export GIT_COMMITTER_DATE=1970-01-01T00:00:00Z
+export GIT_AUTHOR_DATE=1970-01-01T00:00:00Z
+export GIT_DIR=$(check git rev-parse --git-dir)
+HEADREF=$(check git rev-parse HEAD)
+HEADFILE=$(check cat $GIT_DIR/HEAD)
+
+# create the empty tree object (not hard-wired on old git versions)
+: | git hash-object -w -t tree --stdin | :
+
+TMPIDX=""
+trap 'rm -f $TMPIDX' EXIT
+TMPIDX=$(check mktemp -t git-repostate-tmpidx-XXXXXXXX)
+export GIT_INDEX_FILE=$TMPIDX 
+git read-tree 4b825dc642cb6eb9a060e54bf8d69288fbee490
+
+FMT='diff
+new file mode 100644
+--- /dev/null
++++ b/%s
+@@ -0,0 +1 @@
++%s
+' 
+
+# Create "patch" with contents of refs/ tree and apply it to temp index
+{
+    check git for-each-ref $REFS --format="%(objectname) %(refname)"
+} | {
+    printf "$FMT" "HEAD" "$HEADFILE"
+    while read objectname refname; do
+        printf "$FMT" "$refname" "$objectname"
+    done
+} | {
+    check git apply --cached
+}
+
+# Create commit object with all references as parents to ensure they are
+# included when repostate object is pushed.
+
+# Note: the target object of annotated tags is included, but not the tag
+# object itself. If your repository includes unpushed annotated tags they
+# may be lost on restoring.
+{ 
+    echo "$HEADREF"
+    check git for-each-ref $REFS --format="%(*objectname) %(objectname)"
+} | {
+    while read x y; do 
+        echo "-p" "$x"
+    done
+} | {
+    check sort -u
+} | {
+    check xargs git commit-tree $(check git write-tree)
+}

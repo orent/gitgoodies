@@ -1,0 +1,13 @@
+#!/bin/sh
+# https://opensource.org/licenses/MIT (c) 2017
+# Oren Tirosh <oren.tirosh@compassnetworks.com>
+#
+# Add date in rfc-3339 format to output of git-branch command. 
+# Suitable for piping into sort(1).
+
+git branch "$@" | while read line; do
+  echo "$line" | (
+    read ref b c; test "*" = "$ref" && ref="$b"
+    printf "%s\t%s\n" "$(git log --pretty=format:%ci --no-walk "$ref" )" "$line"
+  )
+done

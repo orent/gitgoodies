@@ -1,0 +1,11 @@
+#!/bin/sh
+# Oren Tirosh <oren.tirosh@compassnetworks.com>
+# https://opensource.org/licenses/MIT (c) 2017
+#
+# Execute a command at the top directory of the git worktree
+
+TOP=$(git rev-parse --show-toplevel)
+test -d "$TOP" || exit 1
+cd "$TOP" || exit 1
+test -x "$(command -v "$1")" && set -- exec "$@"
+"${@:-pwd}"

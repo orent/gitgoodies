@@ -1,0 +1,12 @@
+#!/bin/sh
+# https://opensource.org/licenses/MIT (c) 2017
+# Oren Tirosh <orent@hishome.net>
+#
+# Save worktree modifications to commit at HEAD
+
+test "x-f" = "x$1" || git rev-list --no-walk HEAD --not --remotes | read x || { 
+    echo "Refusing to modify commit already pushed to remote repository ( git fixup -f to override )" >&2
+    exit 1
+}
+
+exec git commit -a --amend --reuse-message=HEAD --reset-author --allow-empty --no-verify

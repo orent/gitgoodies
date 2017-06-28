@@ -1,0 +1,22 @@
+#!/bin/sh
+# https://opensource.org/licenses/MIT (c) 2017
+# Oren Tirosh <orent@hishome.nte>
+#
+# Restore a repository state created by "git repostate" and overwrite the
+# current state of the repository. 
+# A backup of repository state is saved in .git/packed-refs.repostate.bak
+
+check() {
+  trap "exit 1" USR1
+  "${@:-:}" || { echo "${0##*/}: '$1' returned exit code $? on line $LINENO" >&2; kill -USR1 0; exit $?; }
+} 
+
+test $# = 1 || { echo "Usage: git repostate-restore <repostate-hash>"; exit 1; }
+
+export GIT_DIR=$(check git rev-parse --git-dir)
+
+git cat-file -e "$1:refs/" && git cat-file -e "$1:HEAD" || { echo "'$1' is not a valid repostate"; exit 1; }
+check git pack-refs --all --prune
+check mv -f $GIT_DIR/packed-refs $GIT_DIR/packed-refs.repostate.bak
+
+git archive "$1" | tar -C $GIT_DIR -xf - 2>/dev/null
