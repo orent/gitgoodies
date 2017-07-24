@@ -1,0 +1,26 @@
+#!/bin/sh
+# https://opensource.org/licenses/MIT (c) 2017
+# Oren Tirosh <orent@hishome.net>
+#
+# Show visual status of branch relative to upstream
+
+fail() { echo "${0##*/}: $*" >&2; exit 1; }
+
+SYMHEAD=$(git symbolic-ref HEAD) || fail "Error getting current branch name"
+UPSTREAM=$(git rev-parse @{u}) || fail "Error getting upstream branch"
+HEAD=$(git rev-parse HEAD) || fail "Error getting branch head"
+test "$HEAD" = "$UPSTREAM" && fail "Branch is in sync with upstream"
+TRACKING=$(git for-each-ref $SYMHEAD --format="%(upstream:track)" 2>/dev/null)
+# ^ May fail on older gits. Display is still useful witout it.
+COMMON=$(git merge-base $HEAD $UPSTREAM) || fail "Error getting common parent"
+
+FMT="tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\nparent %s\nparent %s\n\n"
+FAKEMERGE=$(
+  printf "$FMT" $HEAD $UPSTREAM | git hash-object -t commit -w --stdin 
+) || fail "Error creating fake merge commit"
+
+LOGARGS="--oneline --graph --decorate --boundary"
+tty <&1 >/dev/null && LOGARGS="$LOGARGS --color"
+
+echo ". . $TRACKING"
+git log $LOGARGS "$@" $COMMON..$FAKEMERGE | tail -n +3
