@@ -1,0 +1,34 @@
+#!/bin/sh
+# https://opensource.org/licenses/MIT (c) 2017
+# Oren Tirosh <orent@hishome.net>
+#
+# Show relationship of multiple branches
+
+fail() { echo "${0##*/}: $*" >&2; exit 1; }
+
+test $# -lt 2 &&
+    fail "Requires names of at least two git branches/revisions."
+
+revs=
+for arg; do
+    rev=$(git rev-parse --verify "$arg^{commit}") || 
+        fail "Error parsing revision '$arg'"
+    revs="$revs $rev"
+done
+
+COMMON=$(git merge-base $revs) || 
+    fail "Error getting common parent"
+FAKEMERGE=$(
+  {
+    echo "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    for rev in $revs; do
+      echo "parent $rev"
+    done
+    echo
+  } | git hash-object -t commit -w --stdin 
+) || fail "Error creating fake merge commit"
+
+LOGARGS="--oneline --graph --decorate --boundary"
+tty <&1 >/dev/null && LOGARGS="$LOGARGS --color"
+
+git log $LOGARGS "$@" $COMMON..$FAKEMERGE | tail -n +3
