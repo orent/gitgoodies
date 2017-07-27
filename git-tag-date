@@ -1,11 +1,1 @@
-#!/bin/sh
-# Oren Tirosh <oren.tirosh@compassnetworks.com>
-# https://opensource.org/licenses/MIT (c) 2017
-#
-# Add date in rfc-3339 format to output of git-tag command. 
-# Suitable for piping into sort(1).
-
-git tag "$@" | while read line
-do
-    printf "%s\t%s\n" "$(git log --pretty=format:%ci --no-walk "$line" )" "$line"
-done
+git-branch-date
