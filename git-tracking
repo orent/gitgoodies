@@ -8,6 +8,7 @@ fail() { echo "${0##*/}: $*" >&2; exit 1; }
 
 SYMHEAD=$(git symbolic-ref HEAD) || fail "Error getting current branch name"
 UPSTREAM=$(git rev-parse @{u}) || fail "Error getting upstream branch"
+SYMUPSTREAM=$(git rev-parse --symbolic-full-name @{u}) || fail "Error getting upstream name"
 HEAD=$(git rev-parse HEAD) || fail "Error getting branch head"
 test "$HEAD" = "$UPSTREAM" && fail "Branch is in sync with upstream"
 TRACKING=$(git for-each-ref $SYMHEAD --format="%(upstream:track)" 2>/dev/null)
@@ -19,8 +20,10 @@ FAKEMERGE=$(
   printf "$FMT" $HEAD $UPSTREAM | git hash-object -t commit -w --stdin 
 ) || fail "Error creating fake merge commit"
 
-LOGARGS="--oneline --graph --decorate --boundary"
+LOGARGS="--oneline --graph --topo-order --boundary"
 tty <&1 >/dev/null && LOGARGS="$LOGARGS --color"
 
-echo ". . $TRACKING"
+echo "$TRACKING"
+echo "+--- HEAD     ${SYMHEAD#refs/heads/}"
+echo "| +- HEAD@{u} ${SYMUPSTREAM#refs/remotes/}"
 git log $LOGARGS "$@" $COMMON..$FAKEMERGE | tail -n +3

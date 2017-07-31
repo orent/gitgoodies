@@ -6,8 +6,10 @@
 
 fail() { echo "${0##*/}: $*" >&2; exit 1; }
 
-test $# -lt 2 &&
-    fail "Requires names of at least two git branches/revisions."
+case $# in
+    0) fail "Requires one or more git branches/revisions.";;
+    1) set HEAD "$1"
+esac
 
 revs=
 for arg; do
@@ -29,6 +31,6 @@ FAKEMERGE=$(
 ) || fail "Error creating fake merge commit"
 
 LOGARGS="--oneline --graph --decorate --boundary"
-tty <&1 >/dev/null && LOGARGS="$LOGARGS --color"
+tty <&0 >/dev/null && LOGARGS="$LOGARGS --color"
 
 git log $LOGARGS "$@" $COMMON..$FAKEMERGE | tail -n +3
