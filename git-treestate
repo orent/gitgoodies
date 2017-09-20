@@ -1,0 +1,63 @@
+#!/bin/sh
+# Oren Tirosh <orent@hishome.net>
+# 
+# Create a snapshot of git worktree state 
+# 
+# Snapshot format is compatible with "git stash create", but is repeatable 
+# i.e. taking a snapshot twice in a row generates the same hash and taking
+# a snapshot after restoring exactly re-creates the exact hash.
+
+check() {
+    trap "exit 1" USR1
+    "${@:-:}" || { 
+        echo "${0##*/}: '$1' returned exit code $? on line $LINENO" >&2
+        kill -USR1 0
+        exit 1
+    }
+} 
+
+export GIT_DIR=$(check git rev-parse --git-dir)
+export GIT_INDEX_FILE=$GIT_DIR/index
+export GIT_WORK_TREE=$(check git rev-parse --show-toplevel)
+export GIT_COMMON_DIR=$(check git rev-parse --git-common-dir)
+test "$GIT_COMMON_DIR" = "--git-common-dir" && GIT_COMMON_DIR=$GIT_DIR
+
+check git update-index --stdin </dev/null
+
+IDX_TREE=$(
+    check git write-tree
+)
+WIP_TREE=$(
+    ORIG_GIT_INDEX_FILE=$GIT_INDEX_FILE
+    GIT_INDEX_FILE=$GIT_INDEX_FILE.wip
+
+    test -e $GIT_INDEX_FILE && git diff --quiet ||  # Already valid?
+        check cp -f $ORIG_GIT_INDEX_FILE $GIT_INDEX_FILE      
+
+    # Synchronize state of index.wip to actual worktree state:
+    check git diff-index --name-only --cached HEAD | 
+        check git update-index --add --remove --stdin
+
+    check git diff-files --name-only               | 
+        check git update-index --add --remove --stdin
+   
+    # Write tree 
+    check git write-tree 
+)
+
+BRANCH=$(git symbolic-ref -q HEAD || echo "(no branch)" )
+MSG=$(check git log --no-walk --pretty="${BRANCH#refs/heads/}: %h %s" HEAD)
+IDX_MSG=$(printf "index on %s\n" "$MSG")
+WIP_MSG=$(printf "WIP on %s\n" "$MSG")
+
+GIT_AUTHOR_DATE=$(
+    # Try to use timestamp of tree loose object to make snapshot repeatable:
+    looseobj="$GIT_COMMON_DIR/objects/${WIP_TREE%??????????????????????????????????????}/${WIP_TREE#??}"
+    stat -c@%Y "$looseobj" 2>/dev/null ||
+    stat -c@%Y "$GIT_INDEX_FILE.wip"            # fallback value, also repeatable if nothing changed
+)
+GIT_COMMITTER_DATE=$GIT_AUTHOR_DATE
+export GIT_COMMITTER_DATE GIT_AUTHOR_DATE
+
+IDX=$(echo "$IDX_MSG" | check git commit-tree $IDX_TREE -p HEAD)
+      echo "$WIP_MSG" | check git commit-tree $WIP_TREE -p HEAD -p $IDX

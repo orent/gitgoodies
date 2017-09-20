@@ -1,0 +1,70 @@
+#!/bin/sh
+# Oren Tirosh <orent@hishome.net>
+# Restore snapshot created by git-treestate (or git stash create)
+
+check() {
+    trap "exit 1" USR1
+    "${@:-:}" || { 
+        echo "${0##*/}: '$1' returned exit code $? on line $LINENO" >&2
+        kill -USR1 0
+        exit 1
+    }
+} 
+
+test $# = 0 && 
+    { echo "Usage: ${0##*/} <treestate-hash>"; exit 1; }
+
+export GIT_DIR=$(check git rev-parse --git-dir)
+export GIT_INDEX_FILE=$GIT_DIR/index
+export GIT_WORK_TREE=$(check git rev-parse --show-toplevel)
+export GIT_COMMON_DIR=$(check git rev-parse --git-common-dir)
+test "x$GIT_COMMON_DIR" = "x--git-common-dir" && GIT_COMMON_DIR=$GIT_DIR
+
+eval "set -- $(check git rev-parse --sq "$1^0" "$1^0^{tree}" "$1^1" "$1^2^{tree}")"
+WIP_COMMIT=$1
+WIP_TREE=$2 
+HEAD_COMMIT=$3 
+IDX_TREE=$4
+BRANCH=$(
+    check git cat-file commit "$WIP_COMMIT" | 
+    while read WIP on BRANCH; do
+        test "WIPon" = "$WIP$on" && { echo "${BRANCH%%:*}"; break; }
+    done
+) 
+test "" = "$BRANCH" -o "" = "$IDX_TREE" && 
+    { echo "'$1' is not a valid treestate"; exit 1; }
+
+# Restore HEAD:
+if test "(no branch)" = "$BRANCH"; then
+    check git update-ref --no-deref HEAD $HEAD_COMMIT
+else
+    check git update-ref refs/heads/$BRANCH $HEAD_COMMIT
+    check git symbolic-ref HEAD refs/heads/$BRANCH
+fi
+
+# Restore index:
+git diff-index --cached --quiet $IDX_TREE || check git read-tree $IDX_TREE
+
+# Restore WIP:
+export GIT_INDEX_FILE=$GIT_DIR/index.wip
+git diff-index --cached --quiet $WIP_TREE || check git read-tree $WIP_TREE
+git update-index --refresh >/dev/null || :
+check git diff-files --name-only | git checkout-index --force --quiet --stdin
+
+# Done. Now restore timestamps for repeatable snapshots:
+
+objdir="${WIP_TREE%??????????????????????????????????????}"
+objfile="${WIP_TREE#??}"
+looseobj="$GIT_COMMON_DIR/objects/$objdir/$objfile"
+# WIP_TREE will usually exist as a loose object, but recreate in case it is packed:
+test -e "$looseobj" || (
+    check mkdir -p "$GIT_COMMON_DIR/objects/$objdir/"
+    tmp_git_objects=$(check mktemp -d $GIT_COMMON_DIR/.objects_tmp_XXXXXXX)
+    check mkdir -p "$tmp_git_objects"
+    echo "$WIP_TREE" | check git pack-objects -q --stdout | 
+        GIT_OBJECT_DIRECTORY=$tmp_git_objects check git unpack-objects -q
+    check mv -f "$tmp_git_objects/$objdir/$objfile" "$looseobj"
+    check rmdir "$tmp_git_objects/$objdir"
+    check rmdir "$tmp_git_objects"
+)
+check touch -d "@$(check git log --no-walk --pretty=format:"%ct" $WIP_COMMIT)" "$looseobj"

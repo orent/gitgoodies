@@ -1,0 +1,49 @@
+#!/bin/sh
+# Oren Tirosh <orent@hishome.net>
+# 
+# Create a snapshot of git repository state 
+# (format is compatible with "git stash create")
+
+git update-index --stdin </dev/null || exit
+set -e; trap "echo Unexpected error. Run with sh -x to debug." EXIT; trap exit USR1
+
+GIT_WORK_TREE=$(git rev-parse --show-toplevel)
+test -d "$GIT_WORK_TREE"
+GIT_DIR=$(git rev-parse --git-dir)
+test -d "$GIT_DIR"
+GIT_COMMON_DIR=$(git rev-parse --git-common-dir)
+test -d "$GIT_COMMON_DIR" || GIT_COMMON_DIR=$GIT_DIR
+GIT_OBJECT_DIRECTORY=$(git rev-parse --git-path objects)
+test -d "$GIT_OBJECT_DIRECTORY" || GIT_OBJECT_DIRECTORY="$GIT_COMMON_DIRECTORY/objects"
+test -d $GIT_OBJECT_DIRECTORY
+
+export GIT_WORK_TREE GIT_DIR GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
+
+IDX_TREE=$(
+    git write-tree
+)
+WIP_TREE=$(
+    export GIT_INDEX_FILE=$GIT_DIR/.wip_index
+    git diff --quiet || cp -f $GIT_DIR/index $GIT_INDEX_FILE
+    ( git diff-index --name-only --cached HEAD || kill -s USR1 $$) | git update-index --add --remove --stdin
+    ( git diff-files --name-only               || kill -s USR1 $$) | git update-index --add --remove --stdin
+    git write-tree 
+)
+
+BRANCH=$(git symbolic-ref -q HEAD || echo '(no branch)' )
+MSG=$(git log --no-walk --pretty="${BRANCH#refs/heads/}: %h %s" HEAD)
+
+GIT_AUTHOR_DATE=$(
+    # Try to use timestamp of tree loose object to make snapshot repeatable:
+    looseobj="$GIT_OBJECT_DIRECTORY/${WIP_TREE%??????????????????????????????????????}/${WIP_TREE#??}"
+    stat -c@%Y "$looseobj" 2>/dev/null ||
+    stat -c@%Y "$GIT_DIR/.wip_index"
+)
+GIT_COMMITTER_DATE=$GIT_AUTHOR_DATE
+export GIT_COMMITTER_DATE GIT_AUTHOR_DATE
+
+IDX_COMMIT=$( printf "index on %s\n" "$MSG" | git commit-tree $IDX_TREE -p HEAD )
+WIP_COMMIT=$( printf   "WIP on %s\n" "$MSG" | git commit-tree $WIP_TREE -p HEAD -p $IDX_COMMIT )
+echo $WIP_COMMIT
+
+trap - EXIT
