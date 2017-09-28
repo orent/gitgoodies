@@ -10,7 +10,19 @@ SYMHEAD=$(git symbolic-ref HEAD) || fail "Error getting current branch name"
 UPSTREAM=$(git rev-parse @{u}) || fail "Error getting upstream branch"
 SYMUPSTREAM=$(git rev-parse --symbolic-full-name @{u}) || fail "Error getting upstream name"
 HEAD=$(git rev-parse HEAD) || fail "Error getting branch head"
-test "$HEAD" = "$UPSTREAM" && fail "Branch is in sync with upstream"
+
+remoteurl() {
+    LOCALBRANCH=${SYMHEAD#refs/heads/}
+        test "$LOCALBRANCH" = "$SYMHEAD" && return 1
+    REMOTENAME=$(git config --get "branch.${LOCALBRANCH}.remote")
+        test "" = "$REMOTENAME" && return 1
+    REMOTEURL=$(git config --get "remote.${REMOTENAME}.url")
+        test "" = "$REMOTEURL" && return 1
+    printf "${1:-%s}" "$REMOTEURL"
+    return 0
+}
+
+test "$HEAD" = "$UPSTREAM" && fail "Branch is in sync with upstream$(remoteurl " at %s" )"
 TRACKING=$(git for-each-ref $SYMHEAD --format="%(upstream:track)" 2>/dev/null)
 # ^ May fail on older gits. Display is still useful witout it.
 COMMON=$(git merge-base $HEAD $UPSTREAM) || fail "Error getting common parent"
@@ -25,5 +37,5 @@ tty <&1 >/dev/null && LOGARGS="$LOGARGS --color"
 
 echo "$TRACKING"
 echo "+--- HEAD     ${SYMHEAD#refs/heads/}"
-echo "| +- HEAD@{u} ${SYMUPSTREAM#refs/remotes/}"
+echo "| +- HEAD@{u} ${SYMUPSTREAM#refs/remotes/}$(remoteurl " at %s" )"
 git log $LOGARGS "$@" $COMMON..$FAKEMERGE | tail -n +3
