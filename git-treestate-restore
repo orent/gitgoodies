@@ -14,11 +14,11 @@ check() {
 test $# = 0 && 
     { echo "Usage: ${0##*/} <treestate-hash>"; exit 1; }
 
+export GIT_WORK_TREE=$(check git rev-parse --show-toplevel)
 export GIT_DIR=$(check git rev-parse --git-dir)
 export GIT_INDEX_FILE=$GIT_DIR/index
-export GIT_WORK_TREE=$(check git rev-parse --show-toplevel)
 export GIT_COMMON_DIR=$(check git rev-parse --git-common-dir)
-test "x$GIT_COMMON_DIR" = "x--git-common-dir" && GIT_COMMON_DIR=$GIT_DIR
+test "$GIT_COMMON_DIR" = "--git-common-dir" && GIT_COMMON_DIR=$GIT_DIR
 
 eval "set -- $(check git rev-parse --sq "$1^0" "$1^0^{tree}" "$1^1" "$1^2^{tree}")"
 WIP_COMMIT=$1
