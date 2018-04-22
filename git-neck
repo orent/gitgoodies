@@ -1,0 +1,99 @@
+#!/bin/sh
+# https://opensource.org/licenses/MIT (c) 2018
+# Oren Tirosh <orent@hishome.net>
+#
+# See and change what your repository looks like from the neck down.
+#
+# Under git-neck, the HEAD is HEAD^ and worktree is HEAD.
+# If you make any changes to the neck, your real HEAD commit is adjusted
+# so that its content remains unmodified with the exact same tree hash.
+# If you look at it as the difference from its (now modified) parent it
+# will appear different.
+#
+# Examples:
+#
+# Split a commit:
+#   git neck status     # see contents of commits
+#   git neck add file   # add specific file for new commit
+#   git neck add -p     # add chosen patches to new commit
+#   git neck commit
+#
+# The added changes will form a new commit just above your original
+# HEAD. You may wish to git commit --amend to update the description
+# of HEAD to reflect whatever was removed from it.
+
+# bash only:
+trap 'ERRL2=$ERRL1; ERRL1=" at line $LINENO"' DEBUG 2>/dev/null
+
+set -e
+trap 'echo Unexpected error$ERRL2' EXIT
+
+exitwith() {
+    if test "$2" != ""; then echo "${0##*/}: $2" >&2; fi
+    trap EXIT; exit $1
+}
+
+fail() {
+    exitwith 1 "$*"
+}
+
+REL_GITD="$(git rev-parse --git-dir)" || fail
+HEAD_HASH=$(git rev-parse --verify HEAD) || fail
+
+git rev-parse --quiet --verify HEAD^1 >/dev/null ||
+    fail 'Must have at least two commits (HEAD + "NECK")'
+
+! git rev-parse --quiet --verify HEAD^2 >/dev/null ||
+    fail 'HEAD is a merge commit. We have more than one neck.'
+
+GITD="$(cd "$REL_GITD" && pwd)"
+test "$REL_GITD" -ef "$GITD"
+
+NECK_ORIG_HEAD=$(git --git-dir=$GITD/neck/.git rev-parse ORIG_HEAD 2>/dev/null || true)
+
+ngit() { git --git-dir="$NECKD/.git" --work-tree="$NECKD/" "$@"; }
+
+if test "$NECK_ORIG_HEAD" != "$HEAD_HASH"; then
+    rm -rf "$GITD/neck" "$GITD/neck.tmp"
+    NECKD="$GITD/neck.tmp"
+    mkdir -p "$NECKD"
+    git init --template= -q "$NECKD"
+    rm -rf "$NECKD/.git/refs" "$NECKD/.git/objects"
+    ln -s "$GITD/objects" "$NECKD/.git/objects"
+    ln -s "$GITD/refs"    "$NECKD/.git/refs"
+    ngit update-ref --no-deref HEAD $HEAD_HASH
+    ngit reset -q HEAD
+    # Lightweight worktree: only modified files actually checked out
+    ngit ls-files -z |
+        ngit update-index --skip-worktree -z --stdin
+    ngit diff --diff-filter=AMT --name-only --cached HEAD^ -z |
+        ngit update-index --no-skip-worktree -z --stdin
+    ngit reset -q --hard HEAD
+    ngit reset -q HEAD^
+    mv "$GITD/neck.tmp" "$GITD/neck"
+fi
+
+NECKD="$GITD/neck"
+
+# Run user provided command in temporary repo:
+ngit "${@:-status}" ||
+    exitwith $?
+
+NEW_NECK=$(ngit rev-parse HEAD)
+ORIG_NECK=$(ngit rev-parse ORIG_HEAD^)
+if test "$ORIG_NECK" != "$NEW_NECK"; then
+    echo "NECK has been modified, updating HEAD" >&2
+
+    HEADCOMMIT=$(git cat-file commit HEAD)
+    TREELINE="${HEADCOMMIT%%parent*}"
+    NEWPARENT="parent ${NEW_NECK}"
+    REMAINDER="${HEADCOMMIT##*parent ????????????????????????????????????????}"
+    NEWHEAD=$(
+        echo "$TREELINE$NEWPARENT$REMAINDER" |
+            git hash-object -t commit -w --stdin
+    )
+    git update-ref -m "git-neck modified" HEAD $NEWHEAD
+    rm -rf "$NECKD"
+fi
+
+exitwith 0
