@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # https://opensource.org/licenses/MIT (c) 2018
 # Oren Tirosh <orent@hishome.net>
 #
@@ -39,15 +39,20 @@ fail() {
 
 REL_GITD="$(git rev-parse --git-dir)" || fail
 HEAD_HASH=$(git rev-parse --verify HEAD) || fail
+GITD="$(cd "$REL_GITD" && pwd)"
+test "$REL_GITD" -ef "$GITD" || fail
+
+case $1 in 
+    abort|--abort) 
+        rm -rf "$GITD/neck" "$GITD/neck.tmp"
+        exitwith 0;;
+esac
 
 git rev-parse --quiet --verify HEAD^1 >/dev/null ||
     fail 'Must have at least two commits (HEAD + "NECK")'
 
 ! git rev-parse --quiet --verify HEAD^2 >/dev/null ||
     fail 'HEAD is a merge commit. We have more than one neck.'
-
-GITD="$(cd "$REL_GITD" && pwd)"
-test "$REL_GITD" -ef "$GITD"
 
 NECK_ORIG_HEAD=$(git --git-dir=$GITD/neck/.git rev-parse ORIG_HEAD 2>/dev/null || true)
 
