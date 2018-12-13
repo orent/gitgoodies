@@ -4,8 +4,12 @@
 #
 # Execute a command at the top directory of the git worktree
 
-TOP=$(git rev-parse --show-toplevel)
-test -d "$TOP" || exit 1
-cd "$TOP" || exit 1
-test -x "$(command -v "$1")" && set -- exec "$@"
-"${@:-pwd}"
+test ! -x "$(command -v "$1")" || set -- exec "$@"
+
+case $(git rev-parse --is-inside-work-tree) in
+    true)  TOP="$(git rev-parse --show-toplevel)" ;;
+    false) TOP="$(git rev-parse --git-dir)/.." ;;
+    *) exit 1;;
+esac
+
+cd "$TOP" && "${@:-pwd}"
