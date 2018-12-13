@@ -5,12 +5,53 @@
 # Add date in rfc-3339 format to output of git-branch or git-tag command.
 # Suitable for piping into sort(1).
 
-dateof() {
-    git log --pretty=format:%ci --no-walk $1 2>/dev/null
-}
-
+# Original command (branch-date or tag-date)
 cmd=${0##*git-}
-git ${cmd%-date} "$@" | while read line; do
-  ref=$(echo ${line#\*})
-  printf "%-025s\t%s\n" "$(dateof $ref)" "$line"
-done
+
+# Store output of command (stripping '-date' suffix)
+OUTPUT=$(git ${cmd%-date} "$@")
+
+HASHES=$(
+    printf "%s" "$OUTPUT" | 
+        sed 's/[*]/ /;s/ ->.*//' |          # remove '*' HEAD marker and '-> ...' 
+        xargs git rev-parse 2>/dev/null     # resolve to hash
+)
+
+(
+    # Emit hashes with ordinal position
+    n=1
+    for h in $HASHES; do 
+        echo $h o $((n+=1))
+    done
+
+    # Get dates of all commits - duplicate hashes appear only once
+    printf "%s" "$HASHES" | xargs git log --pretty=format:"%H d %ci" --no-walk
+
+) | (
+    # Sort them together by hash, interleaving 'o' and 'd' entries
+    LC_ALL=C sort 
+) | (
+    # Add dates to all hashes, including missing duplicates
+    while read h x y; do
+        case $x in
+            d) date=$y;;        # save commit date
+            o) echo $y $date;;  # add commit date to one or more 'o' entries
+        esac
+    done
+) | (
+    # restore to original order
+    LC_ALL=C sort -n 
+) | (
+    # Accumulate hashes to $@
+    set --
+    while read o date; do
+        set -- "$@" "$date"
+    done
+    printf "%s" "$OUTPUT" | (
+        IFS=
+        for date; do
+            read line
+            printf "%-25s\t%s\n" "$date" "$line"
+        done
+    )
+)

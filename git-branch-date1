@@ -1,0 +1,17 @@
+#!/bin/sh
+# https://opensource.org/licenses/MIT (c) 2017
+# Oren Tirosh <oren.tirosh@compassnetworks.com>
+#
+# Add date in rfc-3339 format to output of git-branch or git-tag command.
+# Suitable for piping into sort(1).
+
+dateof() {
+    git log --pretty=format:%ci --no-walk $1^{commit} 2>/dev/null
+}
+
+cmd=${0##*git-}
+IFS=
+git ${cmd%-date1} "$@" | while read line; do
+  ref=$(echo ${line#[* ] })
+  printf "%-25s\t%s\n" "$(dateof $ref)" "$line"
+done
